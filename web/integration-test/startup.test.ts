@@ -18,7 +18,7 @@ describe("startup", () => {
     const publicPath = path.join(__dirname, "..", ".webpack");
 
     const server = http.createServer(async (request, response) => {
-      return await serveHandler(request, response, {
+      await serveHandler(request, response, {
         public: publicPath,
       });
     });
@@ -35,6 +35,11 @@ describe("startup", () => {
 
     const browser = await chromium.launch();
     const page = await browser.newPage();
+    await page.route("https://api.foxglove.dev/v1/studio-update?**", async (route) => {
+      await route.fulfill({
+        json: {},
+      });
+    });
     await page.goto(url);
 
     try {
@@ -56,7 +61,9 @@ describe("startup", () => {
     } finally {
       await browser.close();
       await new Promise<void>((resolve) => {
-        server.close(() => resolve());
+        server.close(() => {
+          resolve();
+        });
       });
     }
   }, 15_000);

@@ -11,21 +11,24 @@
 //   found at http://www.apache.org/licenses/LICENSE-2.0
 //   You may not use this file except in compliance with the License.
 
-import { Stack } from "@mui/material";
-import { flatten, flatMap, partition, keyBy } from "lodash";
+import { TextFieldProps } from "@mui/material";
+import * as _ from "lodash-es";
 import { CSSProperties, useCallback, useMemo } from "react";
+import { makeStyles } from "tss-react/mui";
 
-import { MessageDefinitionField } from "@foxglove/message-definition";
-import { Immutable } from "@foxglove/studio";
+import { filterMap } from "@foxglove/den/collection";
+import {
+  quoteTopicNameIfNeeded,
+  parseMessagePath,
+  MessagePath,
+  PrimitiveType,
+} from "@foxglove/message-path";
 import * as PanelAPI from "@foxglove/studio-base/PanelAPI";
-import Autocomplete, { IAutocomplete } from "@foxglove/studio-base/components/Autocomplete";
+import { Autocomplete, IAutocomplete } from "@foxglove/studio-base/components/Autocomplete";
 import useGlobalVariables, {
   GlobalVariables,
 } from "@foxglove/studio-base/hooks/useGlobalVariables";
-import { Topic } from "@foxglove/studio-base/players/types";
-import { RosDatatypes } from "@foxglove/studio-base/types/RosDatatypes";
 
-import { RosPath, RosPrimitive } from "./constants";
 import {
   traverseStructure,
   messagePathStructures,
@@ -33,75 +36,6 @@ import {
   validTerminatingStructureItem,
   StructureTraversalResult,
 } from "./messagePathsForDatatype";
-import parseRosPath, { quoteFieldNameIfNeeded, quoteTopicNameIfNeeded } from "./parseRosPath";
-
-// To show an input field with an autocomplete so the user can enter message paths, use:
-//
-//  <MessagePathInput path={this.state.path} onChange={path => this.setState({ path })} />
-//
-// To limit the autocomplete items to only certain types of values, you can use
-//
-//  <MessagePathInput types={["message", "array", "primitives"]} />
-//
-// Or use actual ROS primitive types:
-//
-//  <MessagePathInput types={["uint16", "float64"]} />
-//
-// If you are rendering many input fields, you might want to use `<MessagePathInput index={5}>`,
-// which gets passed down to `<MessagePathInput onChange>` as the second parameter, so you can
-// avoid creating anonymous functions on every render (which will prevent the component from
-// rendering unnecessarily).
-
-// Get a list of Message Path strings for all of the fields (recursively) in a list of topics
-function getFieldPaths(
-  topics: Immutable<Topic[]>,
-  datatypes: Immutable<RosDatatypes>,
-): Map<string, MessageDefinitionField> {
-  const output = new Map<string, MessageDefinitionField>();
-  for (const topic of topics) {
-    if (topic.schemaName == undefined) {
-      continue;
-    }
-    addFieldPathsForType(
-      quoteTopicNameIfNeeded(topic.name),
-      topic.schemaName,
-      datatypes,
-      [],
-      output,
-    );
-  }
-  return output;
-}
-
-function addFieldPathsForType(
-  curPath: string,
-  typeName: string,
-  datatypes: Immutable<RosDatatypes>,
-  seenTypes: string[],
-  output: Map<string, Immutable<MessageDefinitionField>>,
-): void {
-  const msgdef = datatypes.get(typeName);
-  if (msgdef) {
-    for (const field of msgdef.definitions) {
-      if (seenTypes.includes(field.type)) {
-        continue;
-      }
-      if (field.isConstant !== true) {
-        const fieldPath = `${curPath}.${quoteFieldNameIfNeeded(field.name)}`;
-        output.set(fieldPath, field);
-        if (field.isComplex === true) {
-          addFieldPathsForType(
-            fieldPath,
-            field.type,
-            datatypes,
-            [...seenTypes, field.type],
-            output,
-          );
-        }
-      }
-    }
-  }
-}
 
 export function tryToSetDefaultGlobalVar(
   variableName: string,
@@ -117,13 +51,13 @@ export function tryToSetDefaultGlobalVar(
 }
 
 export function getFirstInvalidVariableFromRosPath(
-  rosPath: RosPath,
+  rosPath: MessagePath,
   globalVariables: GlobalVariables,
   setGlobalVariables: (arg0: GlobalVariables) => void,
 ): { variableName: string; loc: number } | undefined {
   const { messagePath } = rosPath;
   const globalVars = Object.keys(globalVariables);
-  return flatMap(messagePath, (path) => {
+  return _.flatMap(messagePath, (path) => {
     const messagePathParts = [];
     if (
       path.type === "filter" &&
@@ -146,7 +80,7 @@ export function getFirstInvalidVariableFromRosPath(
   }).filter(({ variableName }) => !tryToSetDefaultGlobalVar(variableName, setGlobalVariables))[0];
 }
 
-function getExamplePrimitive(primitiveType: RosPrimitive) {
+function getExamplePrimitive(primitiveType: PrimitiveType) {
   switch (primitiveType) {
     case "string":
       return '""';
@@ -173,15 +107,37 @@ type MessagePathInputBaseProps = {
   onChange: (value: string, index?: number) => void;
   validTypes?: readonly string[]; // Valid types, like "message", "array", or "primitive", or a ROS primitive like "float64"
   noMultiSlices?: boolean; // Don't suggest slices with multiple values `[:]`, only single values like `[0]`.
-  autoSize?: boolean;
   placeholder?: string;
   inputStyle?: CSSProperties;
   disabled?: boolean;
   disableAutocomplete?: boolean; // Treat this as a normal input, with no autocomplete.
   readOnly?: boolean;
   prioritizedDatatype?: string;
+  variant?: TextFieldProps["variant"];
 };
 
+const useStyles = makeStyles()({
+  root: { flexGrow: 1 },
+});
+
+/**
+ * To show an input field with an autocomplete so the user can enter message paths, use:
+ *
+ *  <MessagePathInput path={this.state.path} onChange={path => this.setState({ path })} />
+ *
+ * To limit the autocomplete items to only certain types of values, you can use
+ *
+ *  <MessagePathInput types={["message", "array", "primitives"]} />
+ *
+ * Or use actual ROS primitive types:
+ *
+ *  <MessagePathInput types={["uint16", "float64"]} />
+ *
+ * If you are rendering many input fields, you might want to use `<MessagePathInput index={5}>`,
+ * which gets passed down to `<MessagePathInput onChange>` as the second parameter, so you can
+ * avoid creating anonymous functions on every render (which will prevent the component from
+ * rendering unnecessarily).
+ */
 export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
   props: MessagePathInputBaseProps,
 ) {
@@ -193,18 +149,49 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
     path,
     prioritizedDatatype,
     validTypes,
-    autoSize,
     placeholder,
     noMultiSlices,
     inputStyle,
     disableAutocomplete = false,
+    variant = "standard",
   } = props;
+  const { classes } = useStyles();
 
-  const topicFields = useMemo(() => getFieldPaths(topics, datatypes), [datatypes, topics]);
+  const messagePathStructuresForDataype = useMemo(
+    () => messagePathStructures(datatypes),
+    [datatypes],
+  );
+  /** A map from each possible message path to the corresponding MessagePathStructureItem */
+  const allStructureItemsByPath = useMemo(
+    () =>
+      new Map(
+        topics.flatMap((topic) => {
+          if (topic.schemaName == undefined) {
+            return [];
+          }
+          const structureItem = messagePathStructuresForDataype[topic.schemaName];
+          if (structureItem == undefined) {
+            return [];
+          }
+          const allPaths = messagePathsForStructure(structureItem, {
+            validTypes,
+            noMultiSlices,
+          });
+          return filterMap(allPaths, (item) => {
+            if (item.path === "") {
+              // Plain topic items will be added via `topicNamesAutocompleteItems`
+              return undefined;
+            }
+            return [quoteTopicNameIfNeeded(topic.name) + item.path, item.terminatingStructureItem];
+          });
+        }),
+      ),
+    [messagePathStructuresForDataype, noMultiSlices, topics, validTypes],
+  );
 
   const onChangeProp = props.onChange;
   const onChange = useCallback(
-    (event: React.SyntheticEvent<Element>, rawValue: string) => {
+    (event: React.SyntheticEvent, rawValue: string) => {
       // When typing a "{" character, also  insert a "}", so you get an
       // autocomplete window immediately for selecting a filter name.
       let value = rawValue;
@@ -212,7 +199,9 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
         const target = event.target as HTMLInputElement;
         const newCursorPosition = target.selectionEnd ?? 0;
         value = `${value.slice(0, newCursorPosition)}}${value.slice(newCursorPosition)}`;
-        setImmediate(() => target.setSelectionRange(newCursorPosition, newCursorPosition));
+        setImmediate(() => {
+          target.setSelectionRange(newCursorPosition, newCursorPosition);
+        });
       }
       onChangeProp(value, props.index);
     },
@@ -231,8 +220,9 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
 
       // Check if accepting this completion would result in a path to a non-complex field.
       const completedPath = completeStart + rawValue + completeEnd;
-      const completedField = topicFields.get(completedPath);
-      const isSimpleField = completedField != undefined && completedField.isComplex !== true;
+      const completedField = allStructureItemsByPath.get(completedPath);
+      const isSimpleField =
+        completedField != undefined && completedField.structureType === "primitive";
 
       // If we're dealing with a topic name, and we cannot validly end in a message type,
       // add a "." so the user can keep typing to autocomplete the message path.
@@ -249,15 +239,17 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
       // have just autocompleted a name inside that filter).
       if (keepGoingAfterTopicName || value.includes("{") || path.includes("{")) {
         const newCursorPosition = autocompleteRange.start + value.length;
-        setImmediate(() => autocomplete.setSelectionRange(newCursorPosition, newCursorPosition));
+        setImmediate(() => {
+          autocomplete.setSelectionRange(newCursorPosition, newCursorPosition);
+        });
       } else {
         autocomplete.blur();
       }
     },
-    [onChangeProp, path, props.index, topicFields, validTypes],
+    [onChangeProp, path, props.index, allStructureItemsByPath, validTypes],
   );
 
-  const rosPath = useMemo(() => parseRosPath(path), [path]);
+  const rosPath = useMemo(() => parseMessagePath(path), [path]);
 
   const topic = useMemo(() => {
     if (!rosPath) {
@@ -267,11 +259,6 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
     const { topicName } = rosPath;
     return topics.find(({ name }) => name === topicName);
   }, [rosPath, topics]);
-
-  const messagePathStructuresForDataype = useMemo(
-    () => messagePathStructures(datatypes),
-    [datatypes],
-  );
 
   const structureTraversalResult = useMemo((): StructureTraversalResult | undefined => {
     if (!topic || !rosPath?.messagePath) {
@@ -308,8 +295,8 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
   );
 
   const topicNamesAndFieldsAutocompleteItems = useMemo(
-    () => topicNamesAutocompleteItems.concat(Array.from(topicFields.keys())),
-    [topicFields, topicNamesAutocompleteItems],
+    () => topicNamesAutocompleteItems.concat(Array.from(allStructureItemsByPath.keys())),
+    [allStructureItemsByPath, topicNamesAutocompleteItems],
   );
 
   const autocompleteType = useMemo(() => {
@@ -393,13 +380,13 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
           autocompleteItems:
             structure == undefined
               ? []
-              : messagePathsForStructure(structure, {
-                  validTypes,
-                  noMultiSlices,
-                  messagePath: rosPath.messagePath,
-                }).filter(
-                  // .header.seq is pretty useless but shows up everryyywhere.
-                  (msgPath) => msgPath !== "" && !msgPath.endsWith(".header.seq"),
+              : filterMap(
+                  messagePathsForStructure(structure, {
+                    validTypes,
+                    noMultiSlices,
+                    messagePath: rosPath.messagePath,
+                  }),
+                  (item) => item.path,
                 ),
 
           autocompleteRange: {
@@ -451,15 +438,15 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
     globalVariables,
   ]);
 
-  const topicsByName = useMemo(() => keyBy(topics, ({ name }) => name), [topics]);
+  const topicsByName = useMemo(() => _.keyBy(topics, ({ name }) => name), [topics]);
 
   const orderedAutocompleteItems = useMemo(() => {
     if (prioritizedDatatype == undefined) {
       return autocompleteItems;
     }
 
-    return flatten(
-      partition(
+    return _.flatten(
+      _.partition(
         autocompleteItems,
         (item) => topicsByName[item]?.schemaName === prioritizedDatatype,
       ),
@@ -474,33 +461,25 @@ export default React.memo<MessagePathInputBaseProps>(function MessagePathInput(
     (autocompleteType != undefined && !disableAutocomplete && path.length > 0);
 
   return (
-    <Stack
-      direction="row"
-      justifyContent="space-between"
-      alignItems="center"
-      flexGrow={1}
-      flexShrink={0}
-      spacing={0.25}
-    >
-      <Autocomplete
-        items={orderedAutocompleteItems}
-        disabled={props.disabled}
-        readOnly={props.readOnly}
-        filterText={autocompleteFilterText}
-        value={path}
-        onChange={onChange}
-        onSelect={(value, autocomplete) =>
-          onSelect(value, autocomplete, autocompleteType, autocompleteRange)
-        }
-        hasError={hasError}
-        placeholder={
-          placeholder != undefined && placeholder !== "" ? placeholder : "/some/topic.msgs[0].field"
-        }
-        autoSize={autoSize}
-        inputStyle={inputStyle} // Disable autoselect since people often construct complex queries, and it's very annoying
-        // to have the entire input selected whenever you want to make a change to a part it.
-        disableAutoSelect
-      />
-    </Stack>
+    <Autocomplete
+      className={classes.root}
+      variant={variant}
+      items={orderedAutocompleteItems}
+      disabled={props.disabled}
+      readOnly={props.readOnly}
+      filterText={autocompleteFilterText}
+      value={path}
+      onChange={onChange}
+      onSelect={(value, autocomplete) => {
+        onSelect(value, autocomplete, autocompleteType, autocompleteRange);
+      }}
+      hasError={hasError}
+      placeholder={
+        placeholder != undefined && placeholder !== "" ? placeholder : "/some/topic.msgs[0].field"
+      }
+      inputStyle={inputStyle} // Disable autoselect since people often construct complex queries, and it's very annoying
+      // to have the entire input selected whenever you want to make a change to a part it.
+      disableAutoSelect
+    />
   );
 });

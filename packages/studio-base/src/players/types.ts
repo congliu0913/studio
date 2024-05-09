@@ -27,9 +27,14 @@ export type { MessageEvent };
 export type MessageDefinitionsByTopic = {
   [topic: string]: string;
 };
+
 export type ParsedMessageDefinitionsByTopic = {
   [topic: string]: MessageDefinition[];
 };
+
+export type PlaybackSpeed = 0.01 | 0.02 | 0.05 | 0.1 | 0.2 | 0.5 | 0.8 | 1 | 2 | 3 | 5;
+
+export type TopicSelection = Map<string, SubscribePayload>;
 
 // A `Player` is a class that manages playback state. It manages subscriptions,
 // current time, which topics and datatypes are available, and so on.
@@ -63,12 +68,11 @@ export interface Player {
   pausePlayback?(): void;
   seekPlayback?(time: Time): void;
   playUntil?(time: Time): void;
+  enableRepeatPlayback?(enable: boolean): void;
   // Seek to a particular time. Might trigger backfilling.
   // If the Player supports non-real-time speeds (i.e. PlayerState#capabilities contains
   // PlayerCapabilities.setSpeed), set that speed. E.g. 1.0 is real time, 0.2 is 20% of real time.
-  setPlaybackSpeed?(speedFraction: number): void;
-  // Set the globalVariables for Players that support it.
-  // This is generally used to pass new globalVariables to the UserNodePlayer
+  setPlaybackSpeed?(speedFraction: PlaybackSpeed): void;
   setGlobalVariables(globalVariables: GlobalVariables): void;
 }
 
@@ -159,10 +163,13 @@ export type PlayerStateActiveData = {
   // a seek).
   isPlaying: boolean;
 
+  // Whether or not playback will repeat when it reaches the end
+  repeatEnabled: boolean;
+
   // If the Player supports non-real-time speeds (i.e. PlayerState#capabilities contains
   // PlayerCapabilities.setSpeed), this represents that speed as a fraction of real time.
   // E.g. 1.0 is real time, 0.2 is 20% of real time.
-  speed: number;
+  speed: PlaybackSpeed;
 
   // The last time a seek / discontinuity in messages happened. This will clear out data within
   // `PanelAPI` so we're not looking at stale data.
@@ -252,6 +259,11 @@ export type MessageBlock = {
   readonly messagesByTopic: {
     readonly [topic: string]: MessageEvent[];
   };
+  /**
+   * Indicates which topics are yet to be fully loaded for this block. Can be used to track the
+   * progress of block loading. For a fully loaded block this will be empty or undefined.
+   */
+  needTopics?: TopicSelection;
   readonly sizeInBytes: number;
 };
 
@@ -268,16 +280,31 @@ export type Progress = Readonly<{
   // A raw view into the cached binary data stored by the MemoryCacheDataProvider. Only present when
   // using the RandomAccessPlayer.
   readonly messageCache?: BlockCache;
+
+  /** Memory usage information, e.g. the memory size occupied by preloaded or buffered messages. */
+  readonly memoryInfo?: Record<string, number>;
 }>;
 
 export type SubscriptionPreloadType =
   | "full" // Fetch messages for the entire content range.
   | "partial"; // Fetch messages as needed.
 
-// Represents a subscription to a single topic, for use in `setSubscriptions`.
+/**
+ * Represents a subscription to a single topic, for use in `setSubscriptions`.
+ */
 export type SubscribePayload = {
-  // The topic name to subscribe to
+  /**
+   * The name of the topic to subscribe to.
+   */
   topic: string;
+  /**
+   * If defined the source will return only these fields from messages.
+   * Otherwise entire messages will be returned.
+   */
+  fields?: string[];
+  /**
+   * Defines the range of messages to subscribe to.
+   */
   preloadType?: SubscriptionPreloadType;
 };
 
@@ -325,14 +352,4 @@ export const PlayerCapabilities = {
 export interface PlayerMetricsCollectorInterface {
   setProperty(key: string, value: string | number | boolean): void;
   playerConstructed(): void;
-  play(speed: number): void;
-  seek(time: Time): void;
-  setSpeed(speed: number): void;
-  pause(): void;
-  close(): void;
-  setSubscriptions(subscriptions: SubscribePayload[]): void;
-  recordBytesReceived(bytes: number): void;
-  recordPlaybackTime(time: Time, params: { stillLoadingData: boolean }): void;
-  recordUncachedRangeRequest(): void;
-  recordTimeToFirstMsgs(): void;
 }

@@ -49,7 +49,7 @@ export default class FakePlayer implements Player {
       return undefined;
     }
 
-    return await this.#listener({
+    await this.#listener({
       playerId: playerId ?? this.playerId,
       presence: presence ?? PlayerPresence.PRESENT,
       capabilities: this.#capabilities,
@@ -92,6 +92,9 @@ export default class FakePlayer implements Player {
     this.#profile = profile;
   };
   public startPlayback = (): void => {
+    // no-op
+  };
+  public enableRepeatPlayback = (): void => {
     // no-op
   };
   public seekPlayback = (): void => {

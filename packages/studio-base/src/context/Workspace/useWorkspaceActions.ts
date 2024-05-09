@@ -3,7 +3,7 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 import { Draft, produce } from "immer";
-import { union } from "lodash";
+import * as _ from "lodash-es";
 import { Dispatch, SetStateAction, useCallback, useMemo } from "react";
 import { useMountedState } from "react-use";
 
@@ -21,16 +21,17 @@ import {
   usePlayerSelection,
 } from "@foxglove/studio-base/context/PlayerSelectionContext";
 import useCallbackWithToast from "@foxglove/studio-base/hooks/useCallbackWithToast";
+import { PlaybackSpeed } from "@foxglove/studio-base/players/types";
 import { AppEvent } from "@foxglove/studio-base/services/IAnalytics";
 import { downloadTextFile } from "@foxglove/studio-base/util/download";
 
 import {
-  WorkspaceContext,
-  WorkspaceContextStore,
   LeftSidebarItemKey,
   LeftSidebarItemKeys,
   RightSidebarItemKey,
   RightSidebarItemKeys,
+  WorkspaceContext,
+  WorkspaceContextStore,
 } from "./WorkspaceContext";
 import { useOpenFile } from "./useOpenFile";
 
@@ -58,6 +59,7 @@ export type WorkspaceActions = {
 
   playbackControlActions: {
     setRepeat: Dispatch<SetStateAction<boolean>>;
+    setSpeed: Dispatch<SetStateAction<PlaybackSpeed>>;
   };
 
   sidebarActions: {
@@ -209,10 +211,11 @@ export function useWorkspaceActions(): WorkspaceActions {
         },
 
         preferences: {
-          close: () =>
+          close: () => {
             set((draft) => {
               draft.dialogs.preferences = { open: false, initialTab: undefined };
-            }),
+            });
+          },
           open: (initialTab?: AppSettingsTab) => {
             set((draft) => {
               draft.dialogs.preferences = { open: true, initialTab };
@@ -230,22 +233,29 @@ export function useWorkspaceActions(): WorkspaceActions {
         finishTour: (tour: string) => {
           set((draft) => {
             draft.featureTours.active = undefined;
-            draft.featureTours.shown = union(draft.featureTours.shown, [tour]);
+            draft.featureTours.shown = _.union(draft.featureTours.shown, [tour]);
           });
         },
       },
 
-      openPanelSettings: () =>
+      openPanelSettings: () => {
         set((draft) => {
           draft.sidebars.left.item = "panel-settings";
           draft.sidebars.left.open = true;
-        }),
+        });
+      },
 
       playbackControlActions: {
         setRepeat: (setter: SetStateAction<boolean>) => {
           set((draft) => {
             const repeat = setterValue(setter, draft.playbackControls.repeat);
             draft.playbackControls.repeat = repeat;
+          });
+        },
+        setSpeed: (setter: SetStateAction<PlaybackSpeed>) => {
+          set((draft) => {
+            const speed = setterValue(setter, draft.playbackControls.speed);
+            draft.playbackControls.speed = speed;
           });
         },
       },
@@ -274,10 +284,11 @@ export function useWorkspaceActions(): WorkspaceActions {
             });
           },
 
-          setSize: (leftSidebarSize: undefined | number) =>
+          setSize: (leftSidebarSize: undefined | number) => {
             set((draft) => {
               draft.sidebars.left.size = leftSidebarSize;
-            }),
+            });
+          },
         },
         right: {
           selectItem: (selectedRightSidebarItem: undefined | RightSidebarItemKey) => {
@@ -302,10 +313,11 @@ export function useWorkspaceActions(): WorkspaceActions {
             });
           },
 
-          setSize: (rightSidebarSize: undefined | number) =>
+          setSize: (rightSidebarSize: undefined | number) => {
             set((draft) => {
               draft.sidebars.right.size = rightSidebarSize;
-            }),
+            });
+          },
         },
       },
 
